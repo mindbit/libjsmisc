@@ -19,7 +19,7 @@
 #define _JSMISC_H
 
 #include <stdarg.h>
-#include <jsapi.h>
+#include <duktape.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,79 +38,30 @@ extern "C" {
 #define	JS_LOG_INFO	6	/* informational */
 #define	JS_LOG_DEBUG	7	/* debug-level messages */
 
-typedef void (*JSLogCallback)(int priority, const char *format,
+typedef void (*js_log_callback_t)(int priority, const char *format,
 		va_list ap);
 
 #ifdef JS_DEBUG
-#define JS_Log(priority, format, ...)					\
-	JS_LogImpl(priority, "[%s %s:%d] " format, __func__, __FILE__,	\
-			__LINE__, ##__VA_ARGS__)
-#define JS_ReportError(cx, format, ...)					\
-	JS_ReportError(cx, "[%s %s:%d] " format, __func__, __FILE__,	\
+#define js_log(priority, format, ...)					\
+	js_log_impl(priority, "[%s %s:%d] " format, __func__, __FILE__,	\
 			__LINE__, ##__VA_ARGS__)
 #else
-#define JS_Log(priority, format, ...) do {				\
+#define js_log(priority, format, ...) do {				\
 	if (priority < JS_LOG_DEBUG)					\
-		JS_LogImpl(priority, "[%s] " format,			\
+		js_log_impl(priority, "[%s] " format,			\
 				__func__, ##__VA_ARGS__);		\
 } while (0)
 #endif
 
-#define JS_ReportErrno(cx, errnum)					\
-	JS_ReportError(cx, "%s", JS_MiscStrerror(errnum))
-
-#define JS_RetError(cx, format, ...) ({					\
-	JS_ReportError(cx, format, ##__VA_ARGS__);			\
-	JS_FALSE;							\
-})
-
-#define JS_RetErrno(cx, errnum) ({					\
-	JS_ReportErrno(cx, errnum);					\
-	JS_FALSE;							\
-})
-
-void JS_LogImpl(int priority, const char *format, ...);
-void JS_LogSetCallback(JSLogCallback callback);
-
-/**
- * @brief jsval shorthand for JS_EncodeString
- *
- * The function takes a jsval which then attempts to convert to a
- * JSString using JS_ValueToString(). Similarly to JS_EncodeString(),
- * the returned value must be freed with JS_free().
- *
- * @param cx	JavaScript context
- * @param v	value to be encoded
- *
- * @return A pointer to the converted value on success, or NULL on failure
- */
-char *JS_EncodeStringValue(JSContext *cx, jsval v);
-
-/**
- * @brief malloc shorthand for JS_EncodeString
- *
- * This function is identical to JS_EncodeString(), except that the
- * returned value must be freed with free() instead of JS_free().
- */
-char *JS_EncodeStringLoose(JSContext *cx, JSString *str);
-
-/**
- * @brief Safely convert a JSString to jsval
- */
-static inline jsval JS_StringToJsval(JSString *str)
-{
-	return str ? STRING_TO_JSVAL(str) : JSVAL_NULL;
-}
+void js_log_impl(int priority, const char *format, ...);
+void js_log_set_callback(js_log_callback_t callback);
 
 /**
  * @brief Append an element at the end of an array
  */
-JSBool JS_AppendArrayElement(JSContext *cx, JSObject *obj, jsval value,
-		JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
+duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx);
 
-JSErrorReporter JS_MiscSetErrorReporter(JSContext *cx);
-JSBool JS_MiscInit(JSContext *cx, JSObject *obj);
-const char *JS_MiscStrerror(int errnum);
+duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx);
 
 #ifdef __cplusplus
 }

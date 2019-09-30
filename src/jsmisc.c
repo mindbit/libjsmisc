@@ -21,12 +21,9 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <sys/time.h>
-#include <jsdbgapi.h>
 
 #include "config.h"
 #include "jsmisc.h"
-
-#define __jsmisc_array_size(a) (sizeof(a) / sizeof((a)[0]))
 
 static const char * const log_prio_map[] = {
 	[JS_LOG_EMERG]		= "emergency",
@@ -48,6 +45,9 @@ struct str {
 #define STR_CHUNK 4096
 #define STR_INIT {NULL, 0, 0}
 
+/**
+ * @return 0 on success, POSIX error code on error
+ */
 static int str_expand(struct str *str, size_t len)
 {
 	char *newbuf;
@@ -60,7 +60,7 @@ static int str_expand(struct str *str, size_t len)
 		STR_CHUNK;
 	newbuf = realloc(str->buf, newsize);
 	if (!newbuf)
-		return -ENOMEM;
+		return ENOMEM;
 
 	str->buf = newbuf;
 	str->bufsize = newsize;
@@ -68,6 +68,9 @@ static int str_expand(struct str *str, size_t len)
 	return 0;
 }
 
+/**
+ * @return 0 on success, POSIX error code on error
+ */
 static int str_printf(struct str *str, const char *format, ...)
 {
 	char buf[1024];
@@ -79,7 +82,7 @@ static int str_printf(struct str *str, const char *format, ...)
 	va_end(ap);
 
 	if (len < 0 || len >= sizeof(buf))
-		return -EINVAL;
+		return EINVAL;
 
 	if ((ret = str_expand(str, len + 1)))
 		return ret;
@@ -91,40 +94,22 @@ static int str_printf(struct str *str, const char *format, ...)
 	return 0;
 }
 
+/**
+ * @return 0 on success, POSIX error code on error
+ */
 static int str_put_indent(struct str *str, int indent)
 {
 	int i, ret;
+
 	for (i = 0; i < indent; i++) {
-		ret = str_printf(str, "%s", "    ");
-		if (ret)
+		if ((ret = str_printf(str, "%s", "    ")))
 			return ret;
 	}
 
 	return 0;
 }
 
-static int str_append_js_str(struct str *str, JSContext *cx, JSString *js_str)
-{
-	int ret;
-	size_t len = JS_GetStringEncodingLength(cx, js_str);
-
-	if (len < 0)
-		return -EINVAL;
-
-	if ((ret = str_expand(str, len + 1)))
-		return ret;
-
-	len = JS_EncodeStringToBuffer(js_str, str->buf + str->strlen,
-			str->bufsize - str->strlen);
-	if (len < 0)
-		return -EINVAL;
-
-	str->strlen += len;
-	str->buf[str->strlen] = '\0';
-	return 0;
-}
-
-static void JS_LogDefaultCallback(int priority, const char *format,
+static void js_log_default_callback(int priority, const char *format,
 		va_list ap)
 {
 	const char *prio_txt = "<default>";
@@ -136,9 +121,9 @@ static void JS_LogDefaultCallback(int priority, const char *format,
 	vfprintf(stderr, format, ap);
 }
 
-static JSLogCallback js_log_callback = JS_LogDefaultCallback;
+static js_log_callback_t js_log_callback = js_log_default_callback;
 
-void JS_LogImpl(int priority, const char *format, ...)
+void js_log_impl(int priority, const char *format, ...)
 {
 	va_list ap;
 
@@ -148,239 +133,115 @@ void JS_LogImpl(int priority, const char *format, ...)
 	va_end(ap);
 }
 
-void JS_LogSetCallback(JSLogCallback callback)
+void js_log_set_callback(js_log_callback_t callback)
 {
 	js_log_callback = callback;
 }
 
-char *JS_EncodeStringValue(JSContext *cx, jsval v)
+duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx)
 {
-	JSString *str;
+	if (!duk_is_array(ctx, obj_idx))
+		return 0;
 
-	if (JSVAL_IS_NULL(v))
-		return NULL;
-
-	str = JS_ValueToString(cx, v);
-
-	if (str == NULL)
-		return NULL;
-
-	return JS_EncodeString(cx, str);
+	duk_put_prop_index(ctx, obj_idx, duk_get_length(ctx, obj_idx));
+	return 1;
 }
 
-char *JS_EncodeStringLoose(JSContext *cx, JSString *str)
+static int js_sys_print(duk_context *ctx)
 {
-	size_t len;
-	char *ret;
+	int i, argc = duk_get_top(ctx);
 
-	if (!str)
-		return NULL;
+	for (i = 0; i < argc; i++)
+		fputs(duk_safe_to_string(ctx, i), stdout);
 
-	len = JS_GetStringEncodingLength(cx, str);
-	if (len == (size_t)-1)
-		return NULL;
-
-	ret = malloc(len + 1);
-	if (!ret)
-		return ret;
-
-	if (JS_EncodeStringToBuffer(str, ret, len) == (size_t)-1) {
-		free(ret);
-		return NULL;
-	}
-
-	ret[len] = '\0';
-	return ret;
+	return 0;
 }
 
-JSBool JS_AppendArrayElement(JSContext *cx, JSObject *obj, jsval value,
-		JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs)
+static int js_sys_println(duk_context *ctx)
 {
-	uint32_t len;
-
-	if (!obj)
-		return JS_FALSE;
-
-	if (!JS_IsArrayObject(cx, obj))
-		return JS_FALSE;
-
-	if (!JS_GetArrayLength(cx, obj, &len))
-		return JS_FALSE;
-
-	return JS_DefineElement(cx, obj, len, value, getter, setter, attrs);
-}
-
-static void JS_MiscErrorReporter(JSContext *cx, const char *message,
-		JSErrorReport *report)
-{
-	int priority = (report->flags & JSREPORT_WARNING) ?
-		JS_LOG_WARNING : JS_LOG_ERR;
-	const char *filename = report->filename ?
-		report->filename : "noname";
-
-	JS_LogImpl(priority, "[%s:%u:%u] %s\n",
-			filename,
-			report->lineno,
-			report->column,
-			message);
-}
-
-JSErrorReporter JS_MiscSetErrorReporter(JSContext *cx)
-{
-	return JS_SetErrorReporter(cx, JS_MiscErrorReporter);
-}
-
-static JSBool JS_print(JSContext *cx, unsigned argc, jsval *vp)
-{
-	unsigned i;
-
-	for (i = 0; i < argc; i++) {
-		JSString *str = JS_ValueToString(cx, JS_ARGV(cx, vp)[i]);
-		// FIXME check return value
-		// FIXME root str (protect from GC) -> https://developer.mozilla.org/en-US/docs/SpiderMonkey/JSAPI_Reference/JS_ValueToString
-
-		char *c_str = JS_EncodeString(cx, str);
-		fputs(c_str, stdout);
-		JS_free(cx, c_str);
-	}
-
-	return JS_TRUE;
-}
-
-static JSBool JS_println(JSContext *cx, unsigned argc, jsval *vp)
-{
-	JS_print(cx, argc, vp);
+	js_sys_print(ctx);
 	putc('\n', stdout);
-	return JS_TRUE;
+
+	return 0;
 }
 
-static JSBool JS_gettimeofday(JSContext *cx, unsigned argc, jsval *vp)
+static int js_inspect_recursive(duk_context *ctx, duk_idx_t idx, struct str *str,
+		unsigned int indent)
 {
-	struct timeval tv;
-	double us;
-	jsval rval;
+	int ret;
 
-	gettimeofday(&tv, NULL);
-	us =(double)tv.tv_sec * 1000000.0 + tv.tv_usec;
-	rval = JS_NumberValue(us);
-
-	JS_SET_RVAL(cx, vp, rval);
-	return JS_TRUE;
-}
-
-static int JS_InspectRecursive(JSContext *cx, jsval v, struct str *str,
-		unsigned int indent, unsigned int *obj_id)
-{
-	JSString *js_str;
-	int ret = 0, i;
-	size_t len;
-	JSIdArray* ida;
-
-	switch (JS_TypeOfValue(cx, v)) {
-	case JSTYPE_VOID:
-		ret = str_printf(str, "void");
+	switch (duk_get_type(ctx, idx)) {
+	case DUK_TYPE_UNDEFINED:
+		ret = str_printf(str, "undefined");
 		break;
-	case JSTYPE_OBJECT:
-		if (JSVAL_IS_NULL(v)) {
-			ret = str_printf(str, "null");
-			break;
-		}
-		if (JS_IsArrayObject(cx, JSVAL_TO_OBJECT(v))) {
-			uint32_t len, idx;
-			jsval ev;
-			if (!JS_GetArrayLength(cx, JSVAL_TO_OBJECT(v), &len))
-				break;
-			str_printf(str, "Array(%"PRIu32"): [", len);
-			for (idx = 0; idx < len; idx++) {
-				if (!JS_GetElement(cx, JSVAL_TO_OBJECT(v), idx, &ev))
-					continue;
+	case DUK_TYPE_NULL:
+		ret = str_printf(str, "null");
+		break;
+	case DUK_TYPE_BOOLEAN:
+		ret = str_printf(str, "Boolean(%s)",
+				duk_get_boolean(ctx, idx) ? "true" : "false");
+		break;
+	case DUK_TYPE_NUMBER:
+		ret = str_printf(str, "Number(%lf)",
+				(double)duk_get_number(ctx, idx));
+		break;
+	case DUK_TYPE_STRING:
+		/* FIXME Use duk_get_lstring and convert 0-bytes to "\0" */
+		ret = str_printf(str, "String(%s)", duk_get_string(ctx, idx));
+		break;
+	case DUK_TYPE_OBJECT:
+		if (duk_is_array(ctx, idx)) {
+			duk_size_t aidx, alen = duk_get_length(ctx, idx);
+			duk_idx_t tidx;
+
+			str_printf(str, "Array(%ld) [", (long)alen);
+			for (aidx = 0; aidx < alen; aidx++) {
+				duk_get_prop_index(ctx, idx, aidx);
 				str_printf(str, "\n");
 				str_put_indent(str, indent + 1);
-				str_printf(str, "[%"PRIu32"]: ", idx);
-				JS_InspectRecursive(cx, ev, str, indent + 1, obj_id);
+				str_printf(str, "[%ld]: ", (long)aidx);
+				tidx = duk_get_top_index(ctx);
+				js_inspect_recursive(ctx, tidx, str, indent + 1);
+				duk_pop(ctx); /* property value */
 			}
 			str_printf(str, "\n");
 			str_put_indent(str, indent);
 			ret = str_printf(str, "]");
 			break;
 		}
-		if ((ret = str_printf(str, "Object {")))
-			break;
-		ida = JS_Enumerate(cx, JSVAL_TO_OBJECT(v));
-		if (ida) {
-			for (i = 0; i < JS_IdArrayLength(cx, ida); i++) {
-				jsval pv;
-				char *pn;
+		str_printf(str, "Object {");
+		duk_enum(ctx, idx, DUK_ENUM_OWN_PROPERTIES_ONLY);
+		while (duk_next(ctx, -1, 1)) {
+			duk_idx_t tidx = duk_get_top_index(ctx);
 
-				if (!JS_IdToValue(cx, JS_IdArrayGet(cx, ida, i), &pv))
-					continue;
-				if (JS_TypeOfValue(cx, pv) != JSTYPE_STRING)
-					continue;
-
-				pn = JS_EncodeString(cx, JS_ValueToString(cx, pv));
-				str_printf(str, "\n");
-				str_put_indent(str, indent + 1);
-				str_printf(str, "%s: ", pn);
-				if (JS_GetProperty(cx, JSVAL_TO_OBJECT(v), pn, &pv))
-					JS_InspectRecursive(cx, pv, str, indent + 1, obj_id);
-				JS_free(cx, pn);
-			}
-			JS_DestroyIdArray(cx, ida);
+			str_printf(str, "\n");
+			str_put_indent(str, indent + 1);
+			str_printf(str, "%s: ", duk_get_string(ctx, -2));
+			js_inspect_recursive(ctx, tidx, str, indent + 1);
+			duk_pop_2(ctx); /* key and value */
 		}
+		duk_pop(ctx); /* enum object */
 		str_printf(str, "\n");
 		str_put_indent(str, indent);
 		ret = str_printf(str, "}");
 		break;
-	case JSTYPE_FUNCTION:
-		ret = str_printf(str, "function");
-		break;
-	case JSTYPE_STRING:
-		if (!(js_str = JSVAL_TO_STRING(v))) {
-			ret = str_printf(str, "String(null)");
-			break;
-		}
-		len = JS_GetStringLength(js_str);
-		if ((ret = str_printf(str, "String(%zu) \"", len)))
-			break;
-		if ((ret = str_append_js_str(str, cx, JSVAL_TO_STRING(v))))
-			break;
-		ret = str_printf(str, "\"");
-		break;
-	case JSTYPE_NUMBER:
-		js_str = JS_ValueToString(cx, v);
-		if ((ret = str_printf(str, "Number(")))
-			break;
-		if ((ret = str_append_js_str(str, cx, js_str)))
-			break;
-		ret = str_printf(str, ")");
-		break;
-	case JSTYPE_BOOLEAN:
-		js_str = JS_ValueToString(cx, v);
-		if ((ret = str_printf(str, "Boolean(")))
-			break;
-		if ((ret = str_append_js_str(str, cx, js_str)))
-			break;
-		ret = str_printf(str, ")");
-		break;
 	default:
-		ret = str_printf(str, "FIXME");
+		ret = str_printf(str, "<unknown>");
 		break;
 	}
 
 	return ret;
 }
 
-static int JS_InspectRoot(JSContext *cx, unsigned argc, jsval *vp,
-		struct str *str)
+static int js_inspect_root(duk_context *ctx, struct str *str)
 {
+	duk_idx_t idx, argc = duk_get_top(ctx);
 	int ret = 0;
-	unsigned i;
 
-	for (i = 0; i < argc; i++) {
-		unsigned int obj_id = 0;
-		if ((ret = str_printf(str, "$%u = ", i)))
+	for (idx = 0; idx < argc; idx++) {
+		if ((ret = str_printf(str, "$%u = ", idx)))
 			break;
-		if (JS_InspectRecursive(cx, JS_ARGV(cx, vp)[i], str, 0, &obj_id))
+		if (js_inspect_recursive(ctx, idx, str, 0))
 			break;
 		if ((ret = str_printf(str, "\n")))
 			break;
@@ -389,87 +250,65 @@ static int JS_InspectRoot(JSContext *cx, unsigned argc, jsval *vp,
 	return ret;
 }
 
-static JSBool JS_inspect(JSContext *cx, unsigned argc, jsval *vp)
+static int js_sys_inspect(duk_context *ctx)
 {
-	JSString *js_str;
 	struct str c_str = STR_INIT;
-	JSBool ret = JS_FALSE;
 
-	if (!argc) {
-		JS_SET_RVAL(cx, vp, JSVAL_NULL);
-		return JS_TRUE;
-	}
+	if (js_inspect_root(ctx, &c_str))
+		duk_push_null(ctx);
+	else
+		duk_push_lstring(ctx, c_str.buf, c_str.strlen);
 
-	if (JS_InspectRoot(cx, argc, vp, &c_str))
-		goto out;
-
-	js_str = JS_NewStringCopyN(cx, c_str.buf, c_str.strlen);
-	if (!js_str)
-		goto out;
-
-	JS_SET_RVAL(cx, vp, STRING_TO_JSVAL(js_str));
-	ret = JS_TRUE;
-
-out:
 	free(c_str.buf);
-	return ret;
+
+	return 1;
 }
 
-static JSBool JS_dump(JSContext *cx, unsigned argc, jsval *vp)
+static int js_sys_dump(duk_context *ctx)
 {
 	struct str c_str = STR_INIT;
 
-	if (!argc)
-		return JS_TRUE;
-
-	if (!JS_InspectRoot(cx, argc, vp, &c_str))
+	if (!js_inspect_root(ctx, &c_str))
 		fputs(c_str.buf, stdout);
 
 	free(c_str.buf);
-	return JS_TRUE;
+
+	return 0;
 }
 
-static JSBool JS_log(JSContext *cx, unsigned argc, jsval *vp)
+static int js_sys_log(duk_context *ctx)
 {
-	int32_t prio;
-	char *msg;
-	JSScript *script;
-	unsigned int lineno = 0;
+	long lineno = 0;
 	const char *filename = "<unknown>";
 
-	if (argc < 2)
-		return JS_RetErrno(cx, EINVAL);
+	duk_inspect_callstack_entry(ctx, -2);
+	// FIXME: Duktape has no script name information ??
+#if 0
+	duk_get_prop_string(ctx, -1, "fileName");
+	filename = duk_to_string(ctx, -1);
+	duk_pop(ctx);
+#endif
+	duk_get_prop_string(ctx, -1, "lineNumber");
+	lineno = duk_to_int(ctx, -1);
+	duk_pop_2(ctx);
 
-	if (!JS_ValueToInt32(cx, JS_ARGV(cx, vp)[0], &prio))
-		return JS_RetErrno(cx, EINVAL);
+	js_log_impl(duk_to_int(ctx, 0), "[%s:%u] %s\n",
+		filename, lineno,
+		duk_safe_to_string(ctx, 1));
 
-	msg = JS_EncodeStringValue(cx, JS_ARGV(cx, vp)[1]);
-	if (!msg)
-		return JS_RetErrno(cx, EINVAL);
-
-	if (JS_DescribeScriptedCaller(cx, &script, &lineno))
-		filename = JS_GetScriptFilename(cx, script);
-
-	JS_LogImpl(prio, "[%s:%u] %s\n", filename, lineno, msg);
-	JS_free(cx, msg);
-
-	return JS_TRUE;
+	return 0;
 }
 
-static JSFunctionSpec jsmisc_functions[] = {
-	JS_FS("print", JS_print, 0, 0),
-	JS_FS("println", JS_println, 0, 0),
-	JS_FS("gettimeofday", JS_gettimeofday, 0, 0),
-	JS_FS("inspect", JS_inspect, 0, 0),
-	JS_FS("dump", JS_dump, 0, 0),
-	JS_FS("log", JS_log, 2, 0),
-	JS_FS_END
+static duk_function_list_entry js_sys_functions[] = {
+	{"print",	js_sys_print,	DUK_VARARGS},
+	{"println",	js_sys_println,	DUK_VARARGS},
+	{"inspect",	js_sys_inspect,	DUK_VARARGS},
+	{"dump",	js_sys_dump,	DUK_VARARGS},
+	{"log",		js_sys_log,	2},
+	{NULL,		NULL,		0}
 };
 
-static const struct {
-	const char *name;
-	int value;
-} jsmisc_props[] = {
+static const duk_number_list_entry js_sys_props[] = {
 	{"LOG_EMERG",	JS_LOG_EMERG},
 	{"LOG_ALERT",	JS_LOG_ALERT},
 	{"LOG_CRIT",	JS_LOG_CRIT},
@@ -478,35 +317,15 @@ static const struct {
 	{"LOG_NOTICE",	JS_LOG_NOTICE},
 	{"LOG_INFO",	JS_LOG_INFO},
 	{"LOG_DEBUG",	JS_LOG_DEBUG},
+	{NULL,		0.0}
 };
 
-JSBool JS_MiscInit(JSContext *cx, JSObject *obj)
+duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx)
 {
-	int i;
+	js_log(JS_LOG_INFO, "%s\n", VERSION_STR);
 
-	JS_Log(JS_LOG_INFO, "%s\n", VERSION_STR);
+	duk_put_number_list(ctx, obj_idx, js_sys_props);
+	duk_put_function_list(ctx, obj_idx, js_sys_functions);
 
-	if (!obj)
-		return JS_TRUE;
-
-	if (!JS_DefineFunctions(cx, obj, jsmisc_functions))
-		return JS_FALSE;
-
-	for (i = 0; i < __jsmisc_array_size(jsmisc_props); i++) {
-		JSBool status = JS_DefineProperty(cx, obj,
-				jsmisc_props[i].name,
-				INT_TO_JSVAL(jsmisc_props[i].value),
-				NULL, NULL,
-				JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT);
-		if (!status)
-			return JS_FALSE;
-	}
-
-	return JS_TRUE;
-}
-
-const char *JS_MiscStrerror(int errnum)
-{
-	// FIXME thread-safe implementation
-	return strerror(errnum);
+	return 1;
 }
