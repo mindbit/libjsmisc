@@ -47,6 +47,7 @@ void js_log_set_callback(js_log_callback_t callback);
 duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx);
 
 duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx);
+void js_log_error(duk_context *ctx, duk_idx_t obj_idx);
 
 #ifdef __cplusplus
 }

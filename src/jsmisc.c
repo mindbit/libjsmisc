@@ -314,3 +314,34 @@ duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx)
 
 	return 1;
 }
+
+void js_log_error(duk_context *ctx, duk_idx_t obj_idx)
+{
+	const char *name = NULL;
+	const char *message = NULL;
+	const char *file = NULL;
+	int line = 0;
+
+	if (!duk_is_object(ctx, obj_idx)) {
+		js_log(JS_LOG_ERR, "value is not an object\n");
+		return;
+	}
+
+	if (duk_get_prop_string(ctx, obj_idx, "name"))
+		name = duk_safe_to_string(ctx, -1);
+	duk_pop(ctx);
+
+	if (duk_get_prop_string(ctx, obj_idx, "message"))
+		message = duk_safe_to_string(ctx, -1);
+	duk_pop(ctx);
+
+	if (duk_get_prop_string(ctx, obj_idx, "fileName"))
+		file = duk_safe_to_string(ctx, -1);
+	duk_pop(ctx);
+
+	if (duk_get_prop_string(ctx, obj_idx, "lineNumber"))
+		line = duk_to_int(ctx, -1);
+	duk_pop(ctx);
+
+	js_log_impl(JS_LOG_ERR, "[%s:%d] %s: %s\n", file, line, name, message);
+}
