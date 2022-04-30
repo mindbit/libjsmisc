@@ -1,6 +1,6 @@
 AC_PREREQ(2.61)
 # Checks for programs.
-AC_INIT([libjsmisc], [1.1], [support@mindbit.ro])
+AC_INIT([libjsmisc], [2.0], [support@mindbit.ro])
 
 # Detect missing Autoconf Archive library in the system
 m4_pattern_forbid([^AX_])
