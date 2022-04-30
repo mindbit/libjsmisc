@@ -249,6 +249,23 @@ static int js_sys_inspect(duk_context *ctx)
 	return 1;
 }
 
+char *js_inspect(duk_context *ctx, duk_idx_t idx)
+{
+	struct str c_str = STR_INIT;
+
+	js_inspect_recursive(ctx, idx, &c_str, 0);
+
+	return c_str.buf;
+}
+
+void js_dump(duk_context *ctx, duk_idx_t idx)
+{
+	char *str = js_inspect(ctx, idx);
+
+	puts(str);
+	free(str);
+}
+
 static int js_sys_dump(duk_context *ctx)
 {
 	struct str c_str = STR_INIT;

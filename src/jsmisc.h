@@ -48,6 +48,8 @@ duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx);
 
 duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx);
 void js_log_error(duk_context *ctx, duk_idx_t obj_idx);
+char *js_inspect(duk_context *ctx, duk_idx_t idx);
+void js_dump(duk_context *ctx, duk_idx_t idx);
 
 #ifdef __cplusplus
 }
