@@ -4,6 +4,7 @@
 #define _JSMISC_H
 
 #include <stdarg.h>
+#include <string.h>
 #include <duktape.h>
 
 #ifdef __cplusplus
@@ -37,6 +38,32 @@ typedef void (*js_log_callback_t)(int priority, const char *format,
 				__func__, ##__VA_ARGS__);		\
 } while (0)
 #endif
+
+/*
+ * This is defined as a macro because duk_push_error_object() is also
+ * defined as a macro and uses __FILE__ and __LINE__ to prepend the
+ * filename and line to the error string, in a similar way to what we
+ * do for js_log(). Unfortunately, there is no clean way to prevent
+ * that and add the filename/line/function externally in a consistent
+ * way to js_log(). Internally, it is supported by Duktape through the
+ * DUK_AUGMENT_FLAG_NOBLAME_FILELINE flag, which can be or'ed into the
+ * err_code parameter, but the flag definition is not publicly exposed.
+ */
+#define js_report_error(ctx, fmt, ...) ({				\
+	duk_push_error_object(ctx, DUK_ERR_ERROR, fmt, ##__VA_ARGS__);	\
+	duk_throw(ctx);							\
+})
+
+#define js_report_errno(ctx, errnum)					\
+	js_report_error(ctx, "%s", strerror(errnum))
+
+#define js_ret_error(ctx, format, ...) ({				\
+	js_report_error(ctx, format, ##__VA_ARGS__);			\
+})
+
+#define js_ret_errno(ctx, errnum) ({					\
+	js_report_errno(ctx, errnum);					\
+})
 
 void js_log_impl(int priority, const char *format, ...);
 void js_log_set_callback(js_log_callback_t callback);
