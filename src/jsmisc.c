@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -7,7 +9,10 @@
 #include <errno.h>
 #include <sys/time.h>
 
-#include "config.h"
+#ifdef _GNU_SOURCE
+#include <dlfcn.h>
+#endif
+
 #include "jsmisc.h"
 
 static const char * const log_prio_map[] = {
@@ -192,6 +197,14 @@ static int js_inspect_recursive(duk_context *ctx, duk_idx_t idx, struct str *str
 			str_printf(str, "\n");
 			str_put_indent(str, indent);
 			ret = str_printf(str, "]");
+			break;
+		}
+		if (duk_is_c_function(ctx, idx)) {
+			str_printf(str, "NativeFn");
+			break;
+		}
+		if (duk_is_function(ctx, idx)) {
+			str_printf(str, "Function");
 			break;
 		}
 		str_printf(str, "Object {");
