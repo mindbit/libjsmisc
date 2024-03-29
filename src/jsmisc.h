@@ -28,10 +28,12 @@ typedef void (*js_log_callback_t)(int priority, const char *format,
 		va_list ap);
 
 #ifdef JS_DEBUG
+#define JS_NATIVE
 #define js_log(priority, format, ...)					\
 	js_log_impl(priority, "[%s %s:%d] " format, __func__, __FILE__,	\
 			__LINE__, ##__VA_ARGS__)
 #else
+#define JS_NATIVE static
 #define js_log(priority, format, ...) do {				\
 	if (priority < JS_LOG_DEBUG)					\
 		js_log_impl(priority, "[%s] " format,			\

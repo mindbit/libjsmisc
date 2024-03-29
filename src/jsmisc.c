@@ -137,7 +137,7 @@ duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx)
 	return 1;
 }
 
-static int js_sys_print(duk_context *ctx)
+JS_NATIVE int js_sys_print(duk_context *ctx)
 {
 	int i, argc = duk_get_top(ctx);
 
@@ -147,7 +147,7 @@ static int js_sys_print(duk_context *ctx)
 	return 0;
 }
 
-static int js_sys_println(duk_context *ctx)
+JS_NATIVE int js_sys_println(duk_context *ctx)
 {
 	js_sys_print(ctx);
 	putc('\n', stdout);
@@ -200,7 +200,15 @@ static int js_inspect_recursive(duk_context *ctx, duk_idx_t idx, struct str *str
 			break;
 		}
 		if (duk_is_c_function(ctx, idx)) {
-			str_printf(str, "NativeFn");
+			const char *name = NULL;
+#if HAVE_DLADDR
+			Dl_info info;
+			void *foo = duk_get_c_function(ctx, idx);
+
+			if (dladdr(foo, &info))
+				name = info.dli_sname;
+#endif
+			str_printf(str, name ? "NativeFn<%s>" : "NativeFn", name);
 			break;
 		}
 		if (duk_is_function(ctx, idx)) {
@@ -248,7 +256,7 @@ static int js_inspect_root(duk_context *ctx, struct str *str)
 	return ret;
 }
 
-static int js_sys_inspect(duk_context *ctx)
+JS_NATIVE int js_sys_inspect(duk_context *ctx)
 {
 	struct str c_str = STR_INIT;
 
@@ -279,7 +287,7 @@ void js_dump(duk_context *ctx, duk_idx_t idx)
 	free(str);
 }
 
-static int js_sys_dump(duk_context *ctx)
+JS_NATIVE int js_sys_dump(duk_context *ctx)
 {
 	struct str c_str = STR_INIT;
 
@@ -291,7 +299,7 @@ static int js_sys_dump(duk_context *ctx)
 	return 0;
 }
 
-static int js_sys_log(duk_context *ctx)
+JS_NATIVE int js_sys_log(duk_context *ctx)
 {
 	long lineno = 0;
 	const char *filename = "<unknown>";

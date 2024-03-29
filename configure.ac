@@ -8,6 +8,7 @@ m4_pattern_forbid([^AX_])
 AC_CANONICAL_TARGET
 AC_CANONICAL_HOST
 AC_CANONICAL_SYSTEM
+AC_GNU_SOURCE
 AX_COMPILER_VENDOR
 AX_COMPILER_VERSION
 
@@ -25,6 +26,11 @@ LT_INIT
 AC_SUBST(MKDIR_P)
 
 CFLAGS="-Wall $CFLAGS"
+
+# Indirectly add -ldl to LDFLAGS, or else the test below will fail
+AC_CHECK_LIB([dl], [dladdr])
+# Now check for dladdr explicitly to define HAVE_DLADDR in config.h
+AC_CHECK_FUNCS(dladdr)
 
 #
 # additional configure arguments
@@ -62,6 +68,7 @@ AC_ARG_ENABLE([debug],
 
 AS_IF([test "x$enable_debug" = "xyes"], [
      CFLAGS="$CFLAGS -DJS_DEBUG"
+     LDFLAGS="$LDFLAGS -rdynamic"
 ])
 
 #
