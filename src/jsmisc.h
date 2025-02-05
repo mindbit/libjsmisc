@@ -73,6 +73,13 @@ void js_log_set_callback(js_log_callback_t callback);
  */
 duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx);
 
+typedef struct js_array_map_element {
+	duk_uarridx_t idx;
+	const char *val;
+} js_array_map_element_t;
+
+duk_bool_t js_create_array_map(duk_context *ctx, const js_array_map_element_t *e);
+
 duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx);
 void js_log_error(duk_context *ctx, duk_idx_t obj_idx);
 char *js_inspect(duk_context *ctx, duk_idx_t idx);

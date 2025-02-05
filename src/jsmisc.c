@@ -137,6 +137,18 @@ duk_bool_t js_append_array_element(duk_context *ctx, duk_idx_t obj_idx)
 	return 1;
 }
 
+duk_bool_t js_create_array_map(duk_context *ctx, const js_array_map_element_t *e)
+{
+	duk_push_array(ctx);
+
+	while (e && e->val) {
+		duk_push_string(ctx, e->val);
+		duk_put_prop_index(ctx, -2, e++->idx);
+	}
+
+	return 1;
+}
+
 static int js_sys_print(duk_context *ctx)
 {
 	int i, argc = duk_get_top(ctx);
