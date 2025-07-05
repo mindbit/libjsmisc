@@ -16,14 +16,14 @@
 #include "jsmisc.h"
 
 static const char * const log_prio_map[] = {
-	[JS_LOG_EMERG]		= "emergency",
-	[JS_LOG_ALERT]		= "alert",
-	[JS_LOG_CRIT]		= "critical",
-	[JS_LOG_ERR]		= "error",
-	[JS_LOG_WARNING]	= "warning",
-	[JS_LOG_NOTICE]		= "notice",
-	[JS_LOG_INFO]		= "info",
-	[JS_LOG_DEBUG]		= "debug"
+	[LOG_EMERG]	= "emergency",
+	[LOG_ALERT]	= "alert",
+	[LOG_CRIT]	= "critical",
+	[LOG_ERR]	= "error",
+	[LOG_WARNING]	= "warning",
+	[LOG_NOTICE]	= "notice",
+	[LOG_INFO]	= "info",
+	[LOG_DEBUG]	= "debug"
 };
 
 struct str {
@@ -104,7 +104,7 @@ static void js_log_default_callback(int priority, const char *format,
 {
 	const char *prio_txt = "<default>";
 
-	if (priority >= JS_LOG_EMERG && priority <= JS_LOG_DEBUG)
+	if (priority >= LOG_EMERG && priority <= LOG_DEBUG)
 		prio_txt = log_prio_map[priority];
 
 	fprintf(stderr, "[%s] ", prio_txt);
@@ -303,6 +303,24 @@ static int js_sys_dump(duk_context *ctx)
 	return 0;
 }
 
+static int js_sys_openlog(duk_context *ctx)
+{
+	int argc = duk_get_top(ctx);
+	const char *ident = "jsmisc";
+	int facility = LOG_USER;
+
+	if (argc >= 1)
+		ident = duk_safe_to_string(ctx, 0);
+
+	if (argc >= 2)
+		facility = duk_to_int(ctx, 1);
+
+	openlog(ident, LOG_PID, facility);
+	js_log_set_callback(vsyslog);
+
+	return 0;
+}
+
 static int js_sys_log(duk_context *ctx)
 {
 	long lineno = 0;
@@ -331,25 +349,51 @@ static duk_function_list_entry js_sys_functions[] = {
 	{"println",	js_sys_println,	DUK_VARARGS},
 	{"inspect",	js_sys_inspect,	DUK_VARARGS},
 	{"dump",	js_sys_dump,	DUK_VARARGS},
+	{"openlog",	js_sys_openlog,	DUK_VARARGS},
 	{"log",		js_sys_log,	2},
 	{NULL,		NULL,		0}
 };
 
 static const duk_number_list_entry js_sys_props[] = {
-	{"LOG_EMERG",	JS_LOG_EMERG},
-	{"LOG_ALERT",	JS_LOG_ALERT},
-	{"LOG_CRIT",	JS_LOG_CRIT},
-	{"LOG_ERR",	JS_LOG_ERR},
-	{"LOG_WARNING",	JS_LOG_WARNING},
-	{"LOG_NOTICE",	JS_LOG_NOTICE},
-	{"LOG_INFO",	JS_LOG_INFO},
-	{"LOG_DEBUG",	JS_LOG_DEBUG},
+	/* syslog priorities */
+	{"LOG_EMERG",	 LOG_EMERG},
+	{"LOG_ALERT",	 LOG_ALERT},
+	{"LOG_CRIT",	 LOG_CRIT},
+	{"LOG_ERR",	 LOG_ERR},
+	{"LOG_WARNING",	 LOG_WARNING},
+	{"LOG_NOTICE",	 LOG_NOTICE},
+	{"LOG_INFO",	 LOG_INFO},
+	{"LOG_DEBUG",	 LOG_DEBUG},
+	{"LOG_PRIMASK",	 LOG_PRIMASK},
+	/* syslog facilities */
+	{"LOG_KERN",	 LOG_KERN},
+	{"LOG_USER",	 LOG_USER},
+	{"LOG_MAIL",	 LOG_MAIL},
+	{"LOG_DAEMON",	 LOG_DAEMON},
+	{"LOG_AUTH",	 LOG_AUTH},
+	{"LOG_SYSLOG",	 LOG_SYSLOG},
+	{"LOG_LPR",	 LOG_LPR},
+	{"LOG_NEWS",	 LOG_NEWS},
+	{"LOG_UUCP",	 LOG_UUCP},
+	{"LOG_CRON",	 LOG_CRON},
+	{"LOG_AUTHPRIV", LOG_AUTHPRIV},
+	{"LOG_FTP",	 LOG_FTP},
+	{"LOG_LOCAL0",	 LOG_LOCAL0},
+	{"LOG_LOCAL1",	 LOG_LOCAL1},
+	{"LOG_LOCAL2",	 LOG_LOCAL2},
+	{"LOG_LOCAL3",	 LOG_LOCAL3},
+	{"LOG_LOCAL4",	 LOG_LOCAL4},
+	{"LOG_LOCAL5",	 LOG_LOCAL5},
+	{"LOG_LOCAL6",	 LOG_LOCAL6},
+	{"LOG_LOCAL7",	 LOG_LOCAL7},
+	{"LOG_FACMASK",	 LOG_FACMASK},
+	/* sentinel */
 	{NULL,		0.0}
 };
 
 duk_bool_t js_misc_init(duk_context *ctx, duk_idx_t obj_idx)
 {
-	js_log(JS_LOG_INFO, "%s\n", VERSION_STR);
+	js_log(LOG_INFO, "%s\n", VERSION_STR);
 
 	duk_put_number_list(ctx, obj_idx, js_sys_props);
 	duk_put_function_list(ctx, obj_idx, js_sys_functions);
@@ -365,7 +409,7 @@ void js_log_error(duk_context *ctx, duk_idx_t obj_idx)
 	int line = 0;
 
 	if (!duk_is_object(ctx, obj_idx)) {
-		js_log(JS_LOG_ERR, "value is not an object\n");
+		js_log(LOG_ERR, "value is not an object\n");
 		return;
 	}
 
@@ -385,5 +429,5 @@ void js_log_error(duk_context *ctx, duk_idx_t obj_idx)
 		line = duk_to_int(ctx, -1);
 	duk_pop(ctx);
 
-	js_log_impl(JS_LOG_ERR, "[%s:%d] %s: %s\n", file, line, name, message);
+	js_log_impl(LOG_ERR, "[%s:%d] %s: %s\n", file, line, name, message);
 }
